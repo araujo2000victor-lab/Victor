@@ -1,15 +1,21 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { IntelData, SearchResult, QuizQuestion, LawFlashResult } from '../types';
+import { authService } from './authService';
 
 // ============================================================================
-// CONFIGURAÇÃO INICIAL (NOVO SDK)
+// CONFIGURAÇÃO DINÂMICA (LINK COM CONTA DO USUÁRIO)
 // ============================================================================
 
-// Recupera a chave de API de forma segura (previne erro se import.meta.env for undefined)
-// O fallback process.env.API_KEY é garantido pelo vite.config.ts
-const apiKey = (import.meta.env && import.meta.env.VITE_API_KEY) ? import.meta.env.VITE_API_KEY : process.env.API_KEY || "";
-
-const ai = new GoogleGenAI({ apiKey });
+// Helper para obter a instância da IA vinculada ao usuário atual
+const getAIClient = () => {
+    const userKey = authService.getApiKey();
+    
+    if (!userKey) {
+        throw new Error("Chave Gemini não detectada. Por favor, faça login novamente e vincule sua conta Google.");
+    }
+    
+    return new GoogleGenAI({ apiKey: userKey });
+};
 
 const SYSTEM_INSTRUCTION_TEXT = `
 Você é o motor de inteligência do aplicativo "BOPE - Gestão de Estudos".
@@ -32,26 +38,33 @@ const MODELS_PRIORITY = [
  */
 async function generateTacticalContent(params: any) {
   let lastError = null;
+  let ai: GoogleGenAI;
+
+  try {
+      ai = getAIClient();
+  } catch (e: any) {
+      throw new Error(e.message);
+  }
 
   for (const modelName of MODELS_PRIORITY) {
     try {
-      // Configuração para o novo SDK
       const response = await ai.models.generateContent({
         ...params,
         model: modelName
       });
       
-      // Retorna a resposta se sucesso
       return response;
 
     } catch (error: any) {
       console.warn(`[ALERTA TÁTICO] Falha no modelo ${modelName}. Alternando munição...`, error.message);
       lastError = error;
-      // Continua para o próximo modelo da lista
+      // Se o erro for de autenticação, paramos imediatamente
+      if (error.message && (error.message.includes('API key') || error.message.includes('403'))) {
+          throw new Error("Chave Gemini inválida ou expirada. Verifique suas credenciais.");
+      }
     }
   }
 
-  // Se todos falharem
   console.error("[FALHA CRÍTICA] Todos os modelos táticos falharam.");
   throw lastError || new Error("Sistema de inteligência indisponível no momento. Tente novamente mais tarde.");
 }
@@ -110,9 +123,9 @@ export const fetchExamIntel = async (examName: string): Promise<SearchResult> =>
     const data: IntelData = JSON.parse(text);
     return { data, grounding: null };
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("Erro na Inteligência:", error);
-    throw new Error("Falha ao analisar o edital. Verifique o nome do concurso e tente novamente.");
+    throw new Error(error.message || "Falha ao analisar o edital.");
   }
 };
 
@@ -134,7 +147,7 @@ export const generateStudyContent = async (subject: string, topic: string, type:
 
     return response.text || "<p>Erro ao gerar conteúdo.</p>";
   } catch (error) {
-    return "<p>Erro de comunicação com a base tática.</p>";
+    return "<p>Erro de comunicação com a base tática. Verifique sua chave Gemini.</p>";
   }
 };
 
@@ -198,7 +211,7 @@ export const generateLawFlash = async (lawName: string, lawUrl?: string) => {
         const text = response.text;
         return text ? JSON.parse(text) : { article: "Erro", summary: "Tente novamente", isLong: false, tip: "Erro" };
     } catch (e) {
-        return { article: "Sistema indisponível", summary: "Verifique conexão", isLong: false, tip: "Erro" };
+        return { article: "Sistema indisponível", summary: "Verifique sua conexão e chave Gemini.", isLong: false, tip: "Erro" };
     }
 };
 
@@ -210,6 +223,6 @@ export const generatePerformanceAnalysis = async (stats: any) => {
         });
         return response.text || "Análise indisponível.";
     } catch (e) {
-        return "Erro na análise.";
+        return "Erro na análise. Verifique sua chave Gemini.";
     }
 };

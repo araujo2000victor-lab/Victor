@@ -10,16 +10,19 @@ export const authService = {
     return usersStr ? JSON.parse(usersStr) : [];
   },
 
-  // Cria um novo usuário (Recruta)
-  register: (username: string, pin: string, avatar?: string): User => {
+  // Cria um novo usuário (Agora com Email e API Key)
+  register: (username: string, email: string, apiKey: string, pin: string, avatar?: string): User => {
     const users = authService.getUsers();
     
-    // Normaliza para comparação (Case Insensitive)
-    const normalizedUsername = username.trim().toLowerCase();
+    const normalizedEmail = email.trim().toLowerCase();
 
-    // Validação: Verifica se já existe (ignorando case)
-    if (users.some(u => u.username.toLowerCase() === normalizedUsername)) {
-      throw new Error("Este nome de guerra já está em uso por outro soldado.");
+    // Validação: Verifica se já existe email
+    if (users.some(u => (u.email || '').toLowerCase() === normalizedEmail)) {
+      throw new Error("Este email já está vinculado a uma conta.");
+    }
+    if (!apiKey.startsWith('AIza')) {
+        // Validação básica de formato Google API Key
+        throw new Error("Chave de API inválida. Certifique-se de copiar corretamente do Google AI Studio.");
     }
     if (!/^\d{4}$/.test(pin)) {
       throw new Error("O PIN deve conter exatamente 4 números.");
@@ -27,7 +30,9 @@ export const authService = {
 
     const newUser: User = {
       id: Date.now().toString(),
-      username: username.trim(), // Salva como digitado para exibição
+      username: username.trim(), 
+      email: normalizedEmail,
+      apiKey: apiKey.trim(),
       pin,
       createdAt: new Date().toISOString(),
       rank: 'Recruta',
@@ -39,19 +44,30 @@ export const authService = {
     return newUser;
   },
 
-  // Autentica o usuário (Case Insensitive)
-  login: (usernameInput: string, pin: string): User => {
+  // Autentica o usuário (Por Email)
+  login: (emailInput: string, pin: string): User => {
     const users = authService.getUsers();
-    const normalizedInput = usernameInput.trim().toLowerCase();
+    const normalizedInput = emailInput.trim().toLowerCase();
     
-    const user = users.find(u => u.username.toLowerCase() === normalizedInput && u.pin === pin);
+    // Tenta encontrar por email (novo método) ou username (legado)
+    const user = users.find(u => 
+        ((u.email && u.email.toLowerCase() === normalizedInput) || u.username.toLowerCase() === normalizedInput) 
+        && u.pin === pin
+    );
     
     if (!user) {
-      throw new Error("Credenciais inválidas. Verifique nome e PIN.");
+      throw new Error("Credenciais inválidas. Verifique Email e PIN.");
     }
     
     localStorage.setItem(ACTIVE_SESSION_KEY, user.id);
     return user;
+  },
+
+  // Atualiza a chave de API de um usuário existente
+  updateApiKey: (userId: string, newApiKey: string) => {
+      const users = authService.getUsers();
+      const updatedUsers = users.map(u => u.id === userId ? { ...u, apiKey: newApiKey } : u);
+      localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(updatedUsers));
   },
 
   // Excluir usuário
@@ -60,7 +76,6 @@ export const authService = {
     const updatedUsers = users.filter(u => u.id !== userId);
     localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(updatedUsers));
     
-    // Se o usuário excluído era o ativo, faz logout
     if (localStorage.getItem(ACTIVE_SESSION_KEY) === userId) {
         localStorage.removeItem(ACTIVE_SESSION_KEY);
     }
@@ -75,12 +90,17 @@ export const authService = {
     return users.find(u => u.id === userId) || null;
   },
 
+  // Recupera apenas a API Key do usuário ativo
+  getApiKey: (): string | null => {
+      const user = authService.getSession();
+      return user?.apiKey || null;
+  },
+
   // Encerra a sessão
   logout: () => {
     localStorage.removeItem(ACTIVE_SESSION_KEY);
   },
 
-  // Removemos a verificação de link tático (legacy)
   checkForIncomingMission: (): string | null => {
     return null;
   }
