@@ -2,7 +2,7 @@ import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import { IntelData, SearchResult, QuizQuestion } from '../types';
 
 // ============================================================================
-// CONFIGURAÇÃO TÁTICA (ARQUITETURA V2)
+// CONFIGURAÇÃO TÁTICA
 // ============================================================================
 
 const getAIClient = () => {
@@ -13,8 +13,7 @@ const getAIClient = () => {
     return new GoogleGenerativeAI(apiKey);
 };
 
-// MUNIÇÃO PADRÃO (SEM PREFIXO 'models/')
-// Prioridade: Velocidade -> Capacidade -> Economia
+// MUNIÇÃO: Lista limpa sem prefixo 'models/' conforme solicitado
 const MODELS_PRIORITY = [
   'gemini-1.5-flash',
   'gemini-1.5-pro',
@@ -27,12 +26,12 @@ Sua missão: Atuar como especialista em concursos públicos.
 Responda estritamente no formato JSON solicitado quando exigido.
 `;
 
-// Função de Espera Tática (Backoff Exponencial)
+// Função de Espera Tática
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
  * Núcleo de Execução Tática
- * Gerencia a alternância de modelos e tratamento de erros de cota/rede.
+ * Gerencia a alternância de modelos, ativação de ferramentas e retry.
  */
 async function generateTacticalContent(params: { 
     contents: string, 
@@ -41,69 +40,66 @@ async function generateTacticalContent(params: {
   let lastError: any = null;
   const genAI = getAIClient();
 
-  // LOOP DE TENTATIVAS (MODELO POR MODELO)
+  // LOOP DE ALTERNÂNCIA DE MODELOS
   for (const modelName of MODELS_PRIORITY) {
-    // Tenta 2 vezes por modelo para mitigar soluços de rede
-    for (let attempt = 1; attempt <= 2; attempt++) {
-        try {
-            console.log(`[BOPE INTEL] Acionando vetor: ${modelName} (Tentativa ${attempt})`);
+    try {
+        console.log(`[BOPE INTEL] Acionando vetor: ${modelName}`);
 
-            // 1. Instanciação do Modelo com Ferramentas
-            // A ferramenta de busca é injetada aqui obrigatoriamente para garantir acesso à web
-            const model = genAI.getGenerativeModel({
-                model: modelName,
-                systemInstruction: params.config?.systemInstruction || SYSTEM_INSTRUCTION_TEXT,
-                // REGRA ESTRITA: Adiciona googleSearchRetrieval para permitir busca dinâmica
-                tools: [{ googleSearchRetrieval: {} }]
-            });
+        // 1. Instanciação do Modelo com Grounding (Busca Web)
+        const model = genAI.getGenerativeModel({
+            model: modelName,
+            systemInstruction: params.config?.systemInstruction || SYSTEM_INSTRUCTION_TEXT,
+            // ATIVAÇÃO OBRIGATÓRIA DA BUSCA
+            tools: [{ googleSearchRetrieval: {} }]
+        });
 
-            // 2. Configuração de Geração
-            const generationConfig: any = {};
-            if (params.config?.responseMimeType) {
-                generationConfig.responseMimeType = params.config.responseMimeType;
-            }
-            if (params.config?.responseSchema) {
-                generationConfig.responseSchema = params.config.responseSchema;
-            }
-
-            // 3. Execução
-            const result = await model.generateContent({
-                contents: [{ role: 'user', parts: [{ text: params.contents }] }],
-                generationConfig
-            });
-
-            const response = result.response;
-            return response;
-
-        } catch (error: any) {
-            const errMsg = error.message || JSON.stringify(error);
-            lastError = error;
-            console.warn(`[ALERTA TÁTICO] Falha no modelo ${modelName}:`, errMsg);
-
-            // TRATAMENTO DE ERROS
-
-            // Erro 404 (Modelo não encontrado ou incorreto) -> Break para trocar de modelo
-            if (errMsg.includes('404') || errMsg.includes('not found')) {
-                console.log(`[VETOR INVÁLIDO] ${modelName} indisponível. Alternando...`);
-                break; // Sai do loop de tentativas deste modelo e vai para o próximo
-            }
-
-            // Erro 429 (Cota) -> Wait e Retry no mesmo modelo
-            if (errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('Exhausted')) {
-                const delay = attempt * 2500;
-                console.log(`[SOBRECARGA] Recarregando munição... Aguardando ${delay}ms.`);
-                await wait(delay);
-                continue; // Tenta o mesmo modelo novamente
-            }
-
-            // Erros Críticos (Auth) -> Throw
-            if (errMsg.includes('API key') || errMsg.includes('403')) {
-                throw new Error("Credencial Inválida. Verifique sua API Key.");
-            }
-
-            // Outros erros -> Tenta próximo modelo por segurança
-            break; 
+        // 2. Configuração de Geração (Schema e MIME Type)
+        const generationConfig: any = {};
+        
+        if (params.config?.responseMimeType) {
+            generationConfig.responseMimeType = params.config.responseMimeType;
         }
+        
+        if (params.config?.responseSchema) {
+            generationConfig.responseSchema = params.config.responseSchema;
+        }
+
+        // 3. Execução
+        const result = await model.generateContent({
+            contents: [{ role: 'user', parts: [{ text: params.contents }] }],
+            generationConfig
+        });
+
+        const response = result.response;
+        return response;
+
+    } catch (error: any) {
+        const errMsg = error.message || JSON.stringify(error);
+        lastError = error;
+        
+        console.warn(`[ALERTA TÁTICO] Falha no modelo ${modelName}:`, errMsg);
+
+        // ESTRATÉGIA DE RETRY E FAILOVER
+
+        // Erro 429 (Too Many Requests): Aguarda 2 segundos antes de tentar o PRÓXIMO modelo
+        if (errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('Exhausted')) {
+            console.log(`[SOBRECARGA] Cota excedida no ${modelName}. Aguardando 2s para troca tática...`);
+            await wait(2000); 
+            continue; // Vai para o próximo modelo da lista
+        }
+
+        // Erro 404 (Not Found): Modelo inexistente ou nome errado -> Pula imediatamente
+        if (errMsg.includes('404') || errMsg.includes('not found')) {
+            console.log(`[VETOR INVÁLIDO] ${modelName} não encontrado. Alternando...`);
+            continue; // Vai para o próximo modelo da lista
+        }
+
+        // Erros Críticos de Autenticação
+        if (errMsg.includes('API key') || errMsg.includes('403')) {
+            throw new Error("Credencial Inválida. Verifique sua API Key.");
+        }
+
+        // Para outros erros desconhecidos, tenta o próximo modelo por garantia
     }
   }
 
@@ -126,7 +122,6 @@ export const fetchExamIntel = async (query: string): Promise<SearchResult> => {
       `,
       config: {
         responseMimeType: "application/json",
-        // Schema adaptado para @google/generative-ai
         responseSchema: {
           type: SchemaType.OBJECT,
           properties: {
@@ -169,7 +164,8 @@ export const fetchExamIntel = async (query: string): Promise<SearchResult> => {
     if (!text) throw new Error("Resposta nula da Inteligência.");
 
     const data: IntelData = JSON.parse(text);
-    // Adaptação: Na Web SDK, metadados de grounding vêm em candidate.groundingMetadata
+    
+    // Na Web SDK, o groundingMetadata geralmente vem acessível via candidates
     const grounding = response.candidates?.[0]?.groundingMetadata || null;
 
     return { data, grounding: grounding as any };
