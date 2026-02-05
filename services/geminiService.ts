@@ -2,11 +2,12 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { IntelData, SearchResult, QuizQuestion, LawFlashResult } from '../types';
 
 // ============================================================================
-// CONFIGURAÇÃO TÁTICA
+// CONFIGURAÇÃO TÁTICA E INICIALIZAÇÃO
 // ============================================================================
 
 const getAIClient = () => {
-    const apiKey = process.env.API_KEY;
+    // Garante leitura correta da variável de ambiente injetada pelo Vite
+    const apiKey = process.env.API_KEY; 
     if (!apiKey) {
         throw new Error("Chave Gemini não detectada. Verifique suas credenciais.");
     }
@@ -19,12 +20,13 @@ Sua missão: Atuar como especialista em concursos públicos.
 Responda estritamente no formato JSON solicitado quando exigido.
 `;
 
-// Lista de modelos priorizando velocidade e estabilidade (Free Tier)
-// Se o 2.0-flash falhar (429/404), tentamos o 1.5-flash
+// LISTA DE MUNIÇÃO (MODELOS)
+// Removido prefixo 'models/' conforme solicitado.
+// Focando na série 1.5 que é mais estável para o Free Tier atualmente.
 const MODELS_PRIORITY = [
-  'gemini-2.0-flash', 
   'gemini-1.5-flash',
-  'gemini-1.5-pro'
+  'gemini-1.5-pro',
+  'gemini-1.5-flash-8b'
 ];
 
 // Função de espera tática (Backoff)
@@ -33,22 +35,23 @@ const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 async function generateTacticalContent(params: any) {
   let lastError: any = null;
   
-  // Tenta cada modelo na lista de prioridade
+  // LOOP TÁTICO: Tenta cada modelo na lista de prioridade
   for (const modelName of MODELS_PRIORITY) {
-    // Tentativas por modelo (Retry Logic)
-    // Tenta 3 vezes o mesmo modelo se der erro de Cota (429) antes de trocar
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    // Tenta até 2 vezes o mesmo modelo em caso de sobrecarga momentânea
+    for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         const ai = getAIClient();
         
-        console.log(`[BOPE INTEL] Disparando requisição. Modelo: ${modelName} (Tentativa ${attempt})`);
+        console.log(`[BOPE INTEL] Acionando modelo: ${modelName} (Tentativa ${attempt})`);
         
-        // Configuração específica para busca se solicitada
+        // Configuração de ferramentas (Tools)
         const config = { ...params.config };
         
-        // Se usar googleSearch, garante que está configurado corretamente para o modelo
-        if (config.tools && config.tools.some((t: any) => t.googleSearch)) {
-            // Ajuste fino se necessário para modelos específicos
+        // Ajuste específico para garantir que a busca funcione
+        // Na lib @google/genai, a propriedade correta é 'googleSearch', não 'googleSearchRetrieval'
+        if (config.tools) {
+            // Garante a sintaxe correta para a lib instalada
+            config.tools = config.tools.map((t: any) => t.googleSearchRetrieval ? { googleSearch: {} } : t);
         }
 
         const response = await ai.models.generateContent({
@@ -57,35 +60,37 @@ async function generateTacticalContent(params: any) {
           config
         });
 
-        // Sucesso na extração
+        // Se chegou aqui, sucesso! Retorna a resposta.
         return response;
 
       } catch (error: any) {
-        const errMsg = error.message || '';
+        const errMsg = error.message || JSON.stringify(error);
         lastError = error;
         
-        console.warn(`[ALERTA TÁTICO] Erro no modelo ${modelName}:`, errMsg);
+        console.warn(`[ALERTA TÁTICO] Falha no modelo ${modelName}:`, errMsg);
 
-        // Se for erro de COTA (429) ou Serviço Indisponível (503)
-        if (errMsg.includes('429') || errMsg.includes('503') || errMsg.includes('quota')) {
-           const delay = attempt * 2000; // 2s, 4s, 6s...
+        // --- TRATAMENTO DE ERROS ESPECÍFICOS ---
+
+        // 1. Erro de Autenticação (Para tudo imediatamente)
+        if (errMsg.includes('API key') || errMsg.includes('403')) {
+           throw new Error("Chave de Acesso Inválida ou Expirada. Verifique a API Key.");
+        }
+
+        // 2. Erro de Cota (429) - Faz Backoff e tenta novamente ou troca modelo
+        if (errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('Exhausted')) {
+           const delay = attempt * 2000; // 2s, 4s...
            console.log(`[ESPERA TÁTICA] Recarregando munição... Aguardando ${delay}ms.`);
            await wait(delay);
-           continue; // Tenta o mesmo modelo novamente
+           continue; // Tenta o loop interno (mesmo modelo) novamente
         }
 
-        // Se for 404 (Modelo não encontrado ou API Key sem acesso a ele), aborta este modelo e vai para o próximo
+        // 3. Erro de Modelo Não Encontrado (404) - Troca para o próximo da lista
         if (errMsg.includes('404') || errMsg.includes('not found')) {
-           console.log(`[MODELO INCOMPATÍVEL] ${modelName} não disponível. Trocando munição.`);
-           break; // Sai do loop de tentativas deste modelo e vai para o próximo modelo da lista
-        }
-
-        // Se for erro de autenticação, para tudo
-        if (errMsg.includes('API key') || errMsg.includes('403')) {
-           throw new Error("Chave de Acesso Inválida. Verifique a API Key.");
+           console.log(`[MODELO INDISPONÍVEL] ${modelName} não encontrado. Trocando munição.`);
+           break; // Sai do loop interno e vai para o próximo modelo da MODELS_PRIORITY
         }
         
-        // Outros erros, tenta próximo modelo
+        // Outros erros: Tenta próximo modelo por segurança
         break;
       }
     }
@@ -93,7 +98,7 @@ async function generateTacticalContent(params: any) {
 
   // Se chegou aqui, todos os modelos falharam
   console.error("[FALHA CRÍTICA] Todos os modelos falharam.", lastError);
-  throw new Error("Sistema de Inteligência sobrecarregado. Tente novamente em 1 minuto.");
+  throw new Error("Sistema de Inteligência indisponível no momento. Tente novamente em 1 minuto.");
 }
 
 // ============================================================================
@@ -104,13 +109,14 @@ export const fetchExamIntel = async (query: string): Promise<SearchResult> => {
     const response = await generateTacticalContent({
       contents: `Pesquise na web pelo edital mais recente e oficial para: "${query}". 
       Extraia os dados exatos do concurso.
-      Se não houver edital aberto, baseie-se no último edital.
+      Se não houver edital aberto, baseie-se no último edital ou notícias recentes.
       
       IMPORTANTE:
       - 'status' deve ser: 'Edital Publicado', 'Banca Definida', 'Autorizado' ou 'Previsto'.
       `,
       config: {
-        tools: [{ googleSearch: {} }], // Ferramenta de busca oficial do @google/genai
+        // Habilita a busca na web (Grounding)
+        tools: [{ googleSearch: {} }], 
         systemInstruction: SYSTEM_INSTRUCTION_TEXT,
         responseMimeType: "application/json",
         responseSchema: {
