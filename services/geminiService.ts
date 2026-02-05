@@ -20,14 +20,15 @@ Responda estritamente no formato JSON solicitado quando exigido.
 `;
 
 // === ESTRATÉGIA DE MUNIÇÃO INFINITA (FREE TIER) ===
-// Lista de modelos otimizados para o plano gratuito.
-// Se um falhar (cota ou erro), o sistema puxa o próximo da lista automaticamente.
+// Lista de modelos estáveis. Evitamos versões com data específica (-02-05) que expiram rápido.
 const MODELS_PRIORITY = [
-  'gemini-2.0-flash',                  // 1. O mais novo, rápido e inteligente (Free)
-  'gemini-2.0-flash-lite-preview-02-05', // 2. Versão Lite ultra-rápida
-  'gemini-1.5-flash',                  // 3. O clássico confiável (Backup robusto)
-  'gemini-1.5-flash-8b',               // 4. Versão compacta para emergências
+  'gemini-2.0-flash',        // O mais rápido e moderno
+  'gemini-1.5-flash',        // O "cavalo de batalha" confiável (Fallback principal)
+  'gemini-1.5-flash-latest', // Alias para garantir a última versão do 1.5
+  'gemini-1.5-pro-latest'    // Último recurso (mais lento, mas potente)
 ];
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function generateTacticalContent(params: any) {
   let lastError = null;
@@ -41,11 +42,13 @@ async function generateTacticalContent(params: any) {
 
   for (const modelName of MODELS_PRIORITY) {
     try {
-      // Pequena pausa tática apenas se já tiver falhado o principal, para dar fôlego
+      // Pequena pausa tática inicial para não bombardear a API
       if (modelName !== MODELS_PRIORITY[0]) {
-          await new Promise(resolve => setTimeout(resolve, 500));
+          await sleep(1000); 
       }
 
+      console.log(`[BOPE INTEL] Tentando contato via frequência: ${modelName}...`);
+      
       const response = await ai.models.generateContent({
         ...params,
         model: modelName
@@ -54,24 +57,38 @@ async function generateTacticalContent(params: any) {
       return response;
 
     } catch (error: any) {
-      console.warn(`[ALERTA TÁTICO] Falha no modelo ${modelName}. Alternando munição...`, error.message);
+      const errMsg = error.message || '';
+      
+      console.warn(`[ALERTA TÁTICO] Falha no modelo ${modelName}.`, errMsg);
       lastError = error;
       
-      // Se erro de autenticação, para tudo imediatamente.
-      if (error.message && (error.message.includes('API key') || error.message.includes('403'))) {
-         throw new Error("Chave Gemini inválida. Verifique suas credenciais.");
+      // Tratamento de Cota Excedida (429)
+      if (errMsg.includes('429') || errMsg.includes('quota')) {
+         console.warn("Cota excedida no modelo. Aguardando recarga tática (3s)...");
+         await sleep(3000); // Espera 3 segundos antes de tentar o próximo modelo
+         continue; 
       }
-      
-      // Para erros de cota (429) ou servidor (503), o loop continua e tenta o próximo modelo da lista
+
+      // Tratamento de Modelo não encontrado (404)
+      if (errMsg.includes('404') || errMsg.includes('not found')) {
+          console.warn(`Modelo ${modelName} não disponível nesta região/chave. Pulando...`);
+          continue; // Tenta o próximo imediatamente
+      }
+
+      // Se erro de autenticação, abortar missão
+      if (errMsg.includes('API key') || errMsg.includes('403')) {
+         throw new Error("Chave Gemini inválida ou permissão negada. Verifique suas credenciais.");
+      }
     }
   }
 
   console.error("[FALHA CRÍTICA] Todos os modelos táticos falharam.");
   
   if (lastError?.message?.includes('429') || lastError?.message?.includes('quota')) {
-      throw new Error("Sistema sobrecarregado. Aguarde 30 segundos e tente novamente (Recarregando Munição).");
+      throw new Error("Sobrecarga de tráfego tático (Erro 429). Aguarde 1 minuto e tente novamente.");
   }
-  throw lastError || new Error("Sistema de inteligência indisponível no momento.");
+  
+  throw lastError || new Error("Sistema de inteligência indisponível. Verifique sua conexão.");
 }
 
 // ============================================================================
@@ -82,11 +99,11 @@ export const fetchExamIntel = async (query: string): Promise<SearchResult> => {
     const response = await generateTacticalContent({
       contents: `Pesquise na web pelo edital mais recente e oficial para: "${query}". 
       Extraia os dados exatos do concurso. 
-      Se o edital ainda não saiu, baseie-se no último edital publicado.
+      Se o edital ainda não saiu, baseie-se no último edital publicado ou notícias confiáveis recentes.
       
       IMPORTANTE:
       - 'status' deve ser: 'Edital Publicado', 'Banca Definida', 'Autorizado' ou 'Previsto'.
-      - Liste todas as disciplinas principais.
+      - Liste todas as disciplinas principais e seus tópicos.
       `,
       config: {
         tools: [{ googleSearch: {} }],
@@ -150,8 +167,8 @@ export const fetchExamIntel = async (query: string): Promise<SearchResult> => {
 export const generateStudyContent = async (subject: string, topic: string, type: 'summary' | 'full'): Promise<string> => {
   try {
     const prompt = type === 'summary' 
-      ? `Crie um resumo tático (HTML) sobre: ${topic} da disciplina ${subject}. Use tópicos.`
-      : `Crie uma aula completa (HTML) sobre: ${topic} da disciplina ${subject}.`;
+      ? `Crie um resumo tático (HTML) sobre: ${topic} da disciplina ${subject}. Use tópicos, negrito e seja direto.`
+      : `Crie uma aula completa (HTML) sobre: ${topic} da disciplina ${subject}. Inclua conceitos, exemplos práticos e jurisprudência se aplicável.`;
 
     const response = await generateTacticalContent({
       contents: prompt,
@@ -160,8 +177,8 @@ export const generateStudyContent = async (subject: string, topic: string, type:
 
     return response.text || "<p>Erro ao gerar conteúdo.</p>";
   } catch (error: any) {
-    if (error.message.includes('Cota')) return `<p class="text-red-500 font-bold">⚠️ ${error.message}</p>`;
-    return "<p>Erro de comunicação com a base tática.</p>";
+    if (error.message.includes('Cota') || error.message.includes('429')) return `<p class="text-red-500 font-bold">⚠️ Sistema sobrecarregado (Cota). Tente novamente em alguns segundos.</p>`;
+    return `<p>Erro de comunicação com a base tática: ${error.message}</p>`;
   }
 };
 
@@ -171,7 +188,7 @@ export const generateStudyContent = async (subject: string, topic: string, type:
 export const generateQuizQuestions = async (examName: string, bank: string, subject: string, topic: string): Promise<QuizQuestion[]> => {
   try {
     const response = await generateTacticalContent({
-      contents: `Crie 5 questões múltipla escolha (${bank}) sobre ${subject}: ${topic}.`,
+      contents: `Crie 5 questões de múltipla escolha estilo banca ${bank} sobre ${subject}, tópico: ${topic}.`,
       config: {
         systemInstruction: SYSTEM_INSTRUCTION_TEXT,
         responseMimeType: "application/json",
@@ -205,7 +222,7 @@ export const generateQuizQuestions = async (examName: string, bank: string, subj
 export const generateLawFlash = async (lawName: string, lawUrl?: string) => {
     try {
         const response = await generateTacticalContent({
-            contents: `Selecione um artigo importante de: ${lawName}. Retorne JSON.`,
+            contents: `Selecione um artigo importante de: ${lawName}. Retorne JSON com o artigo, resumo e dica.`,
             config: {
                 systemInstruction: SYSTEM_INSTRUCTION_TEXT,
                 responseMimeType: "application/json",
@@ -232,7 +249,7 @@ export const generateLawFlash = async (lawName: string, lawUrl?: string) => {
 export const generatePerformanceAnalysis = async (stats: any) => {
     try {
         const response = await generateTacticalContent({
-            contents: `Analise o desempenho e dê dicas táticas (HTML curto): ${JSON.stringify(stats)}`,
+            contents: `Analise este desempenho de estudo e dê 3 dicas táticas (HTML curto): ${JSON.stringify(stats)}`,
             config: { systemInstruction: SYSTEM_INSTRUCTION_TEXT }
         });
         return response.text || "Análise indisponível.";
