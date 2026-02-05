@@ -1,18 +1,25 @@
-import { GoogleGenAI, Type } from "@google/genai";
-import { IntelData, SearchResult, QuizQuestion, LawFlashResult } from '../types';
+import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
+import { IntelData, SearchResult, QuizQuestion } from '../types';
 
 // ============================================================================
-// CONFIGURAÇÃO TÁTICA E INICIALIZAÇÃO
+// CONFIGURAÇÃO TÁTICA (ARQUITETURA V2)
 // ============================================================================
 
 const getAIClient = () => {
-    // Garante leitura correta da variável de ambiente injetada pelo Vite
-    const apiKey = process.env.API_KEY; 
+    const apiKey = process.env.API_KEY;
     if (!apiKey) {
-        throw new Error("Chave Gemini não detectada. Verifique suas credenciais.");
+        throw new Error("Chave de Acesso (API KEY) não identificada. Abortar missão.");
     }
-    return new GoogleGenAI({ apiKey });
+    return new GoogleGenerativeAI(apiKey);
 };
+
+// MUNIÇÃO PADRÃO (SEM PREFIXO 'models/')
+// Prioridade: Velocidade -> Capacidade -> Economia
+const MODELS_PRIORITY = [
+  'gemini-1.5-flash',
+  'gemini-1.5-pro',
+  'gemini-1.5-flash-8b'
+];
 
 const SYSTEM_INSTRUCTION_TEXT = `
 Você é o motor de inteligência do aplicativo "BOPE - Gestão de Estudos".
@@ -20,85 +27,88 @@ Sua missão: Atuar como especialista em concursos públicos.
 Responda estritamente no formato JSON solicitado quando exigido.
 `;
 
-// LISTA DE MUNIÇÃO (MODELOS)
-// Removido prefixo 'models/' conforme solicitado.
-// Focando na série 1.5 que é mais estável para o Free Tier atualmente.
-const MODELS_PRIORITY = [
-  'gemini-1.5-flash',
-  'gemini-1.5-pro',
-  'gemini-1.5-flash-8b'
-];
-
-// Função de espera tática (Backoff)
+// Função de Espera Tática (Backoff Exponencial)
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-async function generateTacticalContent(params: any) {
+/**
+ * Núcleo de Execução Tática
+ * Gerencia a alternância de modelos e tratamento de erros de cota/rede.
+ */
+async function generateTacticalContent(params: { 
+    contents: string, 
+    config?: any 
+}) {
   let lastError: any = null;
-  
-  // LOOP TÁTICO: Tenta cada modelo na lista de prioridade
+  const genAI = getAIClient();
+
+  // LOOP DE TENTATIVAS (MODELO POR MODELO)
   for (const modelName of MODELS_PRIORITY) {
-    // Tenta até 2 vezes o mesmo modelo em caso de sobrecarga momentânea
+    // Tenta 2 vezes por modelo para mitigar soluços de rede
     for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        const ai = getAIClient();
-        
-        console.log(`[BOPE INTEL] Acionando modelo: ${modelName} (Tentativa ${attempt})`);
-        
-        // Configuração de ferramentas (Tools)
-        const config = { ...params.config };
-        
-        // Ajuste específico para garantir que a busca funcione
-        // Na lib @google/genai, a propriedade correta é 'googleSearch', não 'googleSearchRetrieval'
-        if (config.tools) {
-            // Garante a sintaxe correta para a lib instalada
-            config.tools = config.tools.map((t: any) => t.googleSearchRetrieval ? { googleSearch: {} } : t);
+        try {
+            console.log(`[BOPE INTEL] Acionando vetor: ${modelName} (Tentativa ${attempt})`);
+
+            // 1. Instanciação do Modelo com Ferramentas
+            // A ferramenta de busca é injetada aqui obrigatoriamente para garantir acesso à web
+            const model = genAI.getGenerativeModel({
+                model: modelName,
+                systemInstruction: params.config?.systemInstruction || SYSTEM_INSTRUCTION_TEXT,
+                // REGRA ESTRITA: Adiciona googleSearchRetrieval para permitir busca dinâmica
+                tools: [{ googleSearchRetrieval: {} }]
+            });
+
+            // 2. Configuração de Geração
+            const generationConfig: any = {};
+            if (params.config?.responseMimeType) {
+                generationConfig.responseMimeType = params.config.responseMimeType;
+            }
+            if (params.config?.responseSchema) {
+                generationConfig.responseSchema = params.config.responseSchema;
+            }
+
+            // 3. Execução
+            const result = await model.generateContent({
+                contents: [{ role: 'user', parts: [{ text: params.contents }] }],
+                generationConfig
+            });
+
+            const response = result.response;
+            return response;
+
+        } catch (error: any) {
+            const errMsg = error.message || JSON.stringify(error);
+            lastError = error;
+            console.warn(`[ALERTA TÁTICO] Falha no modelo ${modelName}:`, errMsg);
+
+            // TRATAMENTO DE ERROS
+
+            // Erro 404 (Modelo não encontrado ou incorreto) -> Break para trocar de modelo
+            if (errMsg.includes('404') || errMsg.includes('not found')) {
+                console.log(`[VETOR INVÁLIDO] ${modelName} indisponível. Alternando...`);
+                break; // Sai do loop de tentativas deste modelo e vai para o próximo
+            }
+
+            // Erro 429 (Cota) -> Wait e Retry no mesmo modelo
+            if (errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('Exhausted')) {
+                const delay = attempt * 2500;
+                console.log(`[SOBRECARGA] Recarregando munição... Aguardando ${delay}ms.`);
+                await wait(delay);
+                continue; // Tenta o mesmo modelo novamente
+            }
+
+            // Erros Críticos (Auth) -> Throw
+            if (errMsg.includes('API key') || errMsg.includes('403')) {
+                throw new Error("Credencial Inválida. Verifique sua API Key.");
+            }
+
+            // Outros erros -> Tenta próximo modelo por segurança
+            break; 
         }
-
-        const response = await ai.models.generateContent({
-          ...params,
-          model: modelName,
-          config
-        });
-
-        // Se chegou aqui, sucesso! Retorna a resposta.
-        return response;
-
-      } catch (error: any) {
-        const errMsg = error.message || JSON.stringify(error);
-        lastError = error;
-        
-        console.warn(`[ALERTA TÁTICO] Falha no modelo ${modelName}:`, errMsg);
-
-        // --- TRATAMENTO DE ERROS ESPECÍFICOS ---
-
-        // 1. Erro de Autenticação (Para tudo imediatamente)
-        if (errMsg.includes('API key') || errMsg.includes('403')) {
-           throw new Error("Chave de Acesso Inválida ou Expirada. Verifique a API Key.");
-        }
-
-        // 2. Erro de Cota (429) - Faz Backoff e tenta novamente ou troca modelo
-        if (errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('Exhausted')) {
-           const delay = attempt * 2000; // 2s, 4s...
-           console.log(`[ESPERA TÁTICA] Recarregando munição... Aguardando ${delay}ms.`);
-           await wait(delay);
-           continue; // Tenta o loop interno (mesmo modelo) novamente
-        }
-
-        // 3. Erro de Modelo Não Encontrado (404) - Troca para o próximo da lista
-        if (errMsg.includes('404') || errMsg.includes('not found')) {
-           console.log(`[MODELO INDISPONÍVEL] ${modelName} não encontrado. Trocando munição.`);
-           break; // Sai do loop interno e vai para o próximo modelo da MODELS_PRIORITY
-        }
-        
-        // Outros erros: Tenta próximo modelo por segurança
-        break;
-      }
     }
   }
 
-  // Se chegou aqui, todos os modelos falharam
-  console.error("[FALHA CRÍTICA] Todos os modelos falharam.", lastError);
-  throw new Error("Sistema de Inteligência indisponível no momento. Tente novamente em 1 minuto.");
+  console.error("[FALHA DE MISSÃO] Todos os vetores falharam.", lastError);
+  throw new Error("Sistema de Inteligência offline. Verifique conexão ou cota.");
 }
 
 // ============================================================================
@@ -115,25 +125,23 @@ export const fetchExamIntel = async (query: string): Promise<SearchResult> => {
       - 'status' deve ser: 'Edital Publicado', 'Banca Definida', 'Autorizado' ou 'Previsto'.
       `,
       config: {
-        // Habilita a busca na web (Grounding)
-        tools: [{ googleSearch: {} }], 
-        systemInstruction: SYSTEM_INSTRUCTION_TEXT,
         responseMimeType: "application/json",
+        // Schema adaptado para @google/generative-ai
         responseSchema: {
-          type: Type.OBJECT,
+          type: SchemaType.OBJECT,
           properties: {
             concurso_info: {
-              type: Type.OBJECT,
+              type: SchemaType.OBJECT,
               properties: {
-                nome: { type: Type.STRING },
-                status: { type: Type.STRING },
-                banca: { type: Type.STRING },
+                nome: { type: SchemaType.STRING },
+                status: { type: SchemaType.STRING },
+                banca: { type: SchemaType.STRING },
                 formato_prova: {
-                  type: Type.OBJECT,
+                  type: SchemaType.OBJECT,
                   properties: {
-                    tipo: { type: Type.STRING },
-                    alternativas: { type: Type.NUMBER },
-                    total_questoes: { type: Type.NUMBER }
+                    tipo: { type: SchemaType.STRING },
+                    alternativas: { type: SchemaType.NUMBER },
+                    total_questoes: { type: SchemaType.NUMBER }
                   },
                   required: ['tipo', 'alternativas', 'total_questoes']
                 }
@@ -141,12 +149,12 @@ export const fetchExamIntel = async (query: string): Promise<SearchResult> => {
               required: ['nome', 'status', 'banca', 'formato_prova']
             },
             conteudo_programatico: {
-              type: Type.ARRAY,
+              type: SchemaType.ARRAY,
               items: {
-                type: Type.OBJECT,
+                type: SchemaType.OBJECT,
                 properties: {
-                  disciplina: { type: Type.STRING },
-                  assuntos: { type: Type.ARRAY, items: { type: Type.STRING } }
+                  disciplina: { type: SchemaType.STRING },
+                  assuntos: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } }
                 },
                 required: ['disciplina', 'assuntos']
               }
@@ -157,13 +165,14 @@ export const fetchExamIntel = async (query: string): Promise<SearchResult> => {
       }
     });
 
-    const text = response.text;
-    if (!text) throw new Error("A IA não retornou dados legíveis.");
+    const text = response.text();
+    if (!text) throw new Error("Resposta nula da Inteligência.");
 
     const data: IntelData = JSON.parse(text);
+    // Adaptação: Na Web SDK, metadados de grounding vêm em candidate.groundingMetadata
     const grounding = response.candidates?.[0]?.groundingMetadata || null;
 
-    return { data, grounding };
+    return { data, grounding: grounding as any };
 
   } catch (error: any) {
     console.error("Erro na Inteligência:", error);
@@ -177,15 +186,14 @@ export const fetchExamIntel = async (query: string): Promise<SearchResult> => {
 export const generateStudyContent = async (subject: string, topic: string, type: 'summary' | 'full'): Promise<string> => {
   try {
     const prompt = type === 'summary' 
-      ? `Crie um resumo tático (HTML) sobre: ${topic} da disciplina ${subject}. Use <h3>, <ul>, <li>, <b>.`
-      : `Crie uma aula completa (HTML) sobre: ${topic} da disciplina ${subject}. Seja detalhado.`;
+      ? `Crie um resumo tático (HTML) sobre: ${topic} da disciplina ${subject}. Use <h3>, <ul>, <li>, <b> para formatar.`
+      : `Crie uma aula completa (HTML) sobre: ${topic} da disciplina ${subject}. Seja detalhado, inclua exemplos e jurisprudência se aplicável.`;
 
     const response = await generateTacticalContent({
-      contents: prompt,
-      config: { systemInstruction: SYSTEM_INSTRUCTION_TEXT }
+      contents: prompt
     });
 
-    return response.text || "<p>Erro ao gerar conteúdo.</p>";
+    return response.text();
   } catch (error: any) {
     return `<p class="text-red-500 font-bold">⚠️ Falha na comunicação tática: ${error.message}</p>`;
   }
@@ -199,17 +207,16 @@ export const generateQuizQuestions = async (examName: string, bank: string, subj
     const response = await generateTacticalContent({
       contents: `Crie 5 questões de múltipla escolha estilo banca ${bank} sobre ${subject}, tópico: ${topic}.`,
       config: {
-        systemInstruction: SYSTEM_INSTRUCTION_TEXT,
         responseMimeType: "application/json",
         responseSchema: {
-          type: Type.ARRAY,
+          type: SchemaType.ARRAY,
           items: {
-            type: Type.OBJECT,
+            type: SchemaType.OBJECT,
             properties: {
-              statement: { type: Type.STRING },
-              options: { type: Type.ARRAY, items: { type: Type.STRING } },
-              correctIndex: { type: Type.NUMBER },
-              justification: { type: Type.STRING }
+              statement: { type: SchemaType.STRING },
+              options: { type: SchemaType.ARRAY, items: { type: SchemaType.STRING } },
+              correctIndex: { type: SchemaType.NUMBER },
+              justification: { type: SchemaType.STRING }
             },
             required: ['statement', 'options', 'correctIndex', 'justification']
           }
@@ -217,7 +224,7 @@ export const generateQuizQuestions = async (examName: string, bank: string, subj
       }
     });
 
-    const text = response.text;
+    const text = response.text();
     return text ? JSON.parse(text) : [];
   } catch (error) {
     console.error(error);
@@ -233,22 +240,21 @@ export const generateLawFlash = async (lawName: string, lawUrl?: string) => {
         const response = await generateTacticalContent({
             contents: `Selecione um artigo importante de: ${lawName}. Retorne JSON com artigo, resumo e dica.`,
             config: {
-                systemInstruction: SYSTEM_INSTRUCTION_TEXT,
                 responseMimeType: "application/json",
                 responseSchema: {
-                    type: Type.OBJECT,
+                    type: SchemaType.OBJECT,
                     properties: {
-                        article: { type: Type.STRING },
-                        summary: { type: Type.STRING },
-                        isLong: { type: Type.BOOLEAN },
-                        tip: { type: Type.STRING }
+                        article: { type: SchemaType.STRING },
+                        summary: { type: SchemaType.STRING },
+                        isLong: { type: SchemaType.BOOLEAN },
+                        tip: { type: SchemaType.STRING }
                     },
                     required: ['article', 'summary', 'isLong', 'tip']
                 }
             }
         });
         
-        const text = response.text;
+        const text = response.text();
         return text ? JSON.parse(text) : { article: "Erro", summary: "Tente novamente", isLong: false, tip: "Erro" };
     } catch (e) {
         return { article: "Sistema Indisponível", summary: "Aguarde recarga de cota.", isLong: false, tip: "Erro" };
@@ -258,10 +264,9 @@ export const generateLawFlash = async (lawName: string, lawUrl?: string) => {
 export const generatePerformanceAnalysis = async (stats: any) => {
     try {
         const response = await generateTacticalContent({
-            contents: `Analise este desempenho e dê 3 dicas táticas (HTML curto): ${JSON.stringify(stats)}`,
-            config: { systemInstruction: SYSTEM_INSTRUCTION_TEXT }
+            contents: `Analise este desempenho e dê 3 dicas táticas (HTML curto): ${JSON.stringify(stats)}`
         });
-        return response.text || "Análise indisponível.";
+        return response.text();
     } catch (e) {
         return "Análise indisponível (Cota excedida).";
     }
