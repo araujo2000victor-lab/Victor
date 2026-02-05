@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Shield, ChevronRight, UserPlus, LogIn, Lock, User as UserIcon, Trash2, Camera, Mail, Key, ExternalLink } from 'lucide-react';
+import { Shield, ChevronRight, UserPlus, LogIn, Lock, User as UserIcon, Trash2, Camera, Mail, ExternalLink } from 'lucide-react';
 import { authService } from '../services/authService';
 import { User } from '../types';
 
@@ -13,7 +13,6 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
   // Form States
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
-  const [apiKey, setApiKey] = useState('');
   const [pin, setPin] = useState('');
   const [avatar, setAvatar] = useState<string | undefined>(undefined);
   
@@ -36,9 +35,8 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
       if (isRegistering) {
         if (!username.trim()) throw new Error("Informe seu nome de guerra.");
         if (!email.trim() || !email.includes('@')) throw new Error("Informe um email válido.");
-        if (!apiKey.trim().startsWith('AIza')) throw new Error("Chave Gemini inválida.");
 
-        const user = authService.register(username, email, apiKey, pin, avatar);
+        const user = authService.register(username, email, pin, avatar);
         
         // Auto login
         authService.login(user.email || user.username, user.pin);
@@ -147,32 +145,6 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                  </div>
                </div>
 
-               {isRegistering && (
-                   <div className="animate-in fade-in slide-in-from-top-2">
-                        <label className="block text-[10px] font-bold uppercase text-emerald-600 dark:text-emerald-500 mb-1 flex justify-between items-center" htmlFor="auth-key">
-                            <span>Vincular Gemini (API Key)</span>
-                            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 hover:underline cursor-pointer">
-                                Obter Chave <ExternalLink className="w-3 h-3"/>
-                            </a>
-                        </label>
-                        <div className="relative">
-                        <Key className="absolute left-3 top-2.5 w-4 h-4 text-emerald-500" />
-                        <input 
-                            type="text" 
-                            id="auth-key"
-                            className="w-full bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-800 rounded-sm py-2 pl-10 pr-4 text-sm focus:border-emerald-500 outline-none font-mono text-emerald-800 dark:text-emerald-300 placeholder-emerald-800/30"
-                            placeholder="Cole sua API Key aqui..."
-                            value={apiKey}
-                            onChange={(e) => setApiKey(e.target.value)}
-                            required
-                        />
-                        </div>
-                        <p className="text-[9px] text-gray-400 mt-1">
-                            Sua chave será armazenada localmente apenas para conectar o Agente Gemini à sua conta.
-                        </p>
-                   </div>
-               )}
-
                <div>
                  <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1" htmlFor="auth-pin">PIN de Acesso (4 Dígitos)</label>
                  <div className="relative">
@@ -207,7 +179,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
 
             <div className="mt-6 text-center border-t border-gray-100 dark:border-gray-700 pt-4">
               <button 
-                onClick={() => { setIsRegistering(!isRegistering); setError(null); setUsername(''); setPin(''); setEmail(''); setApiKey(''); setAvatar(undefined); }}
+                onClick={() => { setIsRegistering(!isRegistering); setError(null); setUsername(''); setPin(''); setEmail(''); setAvatar(undefined); }}
                 className="text-xs text-gray-500 hover:text-emerald-600 dark:text-gray-400 dark:hover:text-bope-green font-mono uppercase underline"
               >
                 {isRegistering ? 'Já possui conta vinculada? Entrar' : 'Primeiro acesso? Vincular Conta Google'}
@@ -232,7 +204,6 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onLoginSuccess }) => {
                                  </div>
                              </div>
                              <div className="flex items-center gap-2">
-                                {u.apiKey ? <Key className="w-3 h-3 text-emerald-500" title="Gemini Vinculado"/> : <ExternalLink className="w-3 h-3 text-red-400" title="Sem Vinculação"/>}
                                 <button onClick={(e) => { e.stopPropagation(); handleDeleteUser(u.id, u.username); }} className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded opacity-0 group-hover:opacity-100 transition-opacity">
                                     <Trash2 className="w-3 h-3"/>
                                 </button>

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import Header from './components/Header';
 import MissionInput from './components/MissionInput';
@@ -121,7 +120,23 @@ const App: React.FC = () => {
   };
 
   // Logic: Actions
-  // SUBSTIUIÇÃO: Função de busca removida. Agora usa entrada manual.
+  
+  // 1. Busca Automática (AI)
+  const handleAiSearchRequest = async (query: string) => {
+      setLoading(true);
+      setError(null);
+      try {
+          const result = await fetchExamIntel(query);
+          setActiveResult(result);
+          setView('study');
+      } catch (err: any) {
+          setError(err.message || "Falha na busca tática. Tente novamente.");
+      } finally {
+          setLoading(false);
+      }
+  };
+
+  // 2. Entrada Manual
   const handleManualMissionStart = (data: IntelData) => {
     setActiveResult({ data, grounding: null });
     setView('study');
@@ -130,8 +145,7 @@ const App: React.FC = () => {
   const handleRefreshExam = async () => {
     if (!activeResult?.data) return;
     
-    // Mantemos a função de refresh via IA caso o usuário queira tentar atualizar um edital antigo,
-    // mas o fluxo inicial agora é manual.
+    // Tenta atualizar usando o nome do concurso como query
     const examName = activeResult.data.concurso_info.nome;
     setLoading(true);
     setError(null);
@@ -236,10 +250,11 @@ const App: React.FC = () => {
           />
         )}
 
-        {view === 'search' && !activeResult && (
+        {view === 'search' && !activeResult && !loading && (
            <div className="flex flex-col items-center justify-center min-h-[60vh]">
              <MissionInput 
                 onStartMission={handleManualMissionStart} 
+                onSearchRequest={handleAiSearchRequest}
                 onCancel={handleBackToDashboard}
                 hasSavedExams={savedExams.length > 0}
              />

@@ -10,8 +10,8 @@ export const authService = {
     return usersStr ? JSON.parse(usersStr) : [];
   },
 
-  // Cria um novo usuário (Agora com Email e API Key)
-  register: (username: string, email: string, apiKey: string, pin: string, avatar?: string): User => {
+  // Cria um novo usuário (Agora com Email) - API Key removida conforme guidelines
+  register: (username: string, email: string, pin: string, avatar?: string): User => {
     const users = authService.getUsers();
     
     const normalizedEmail = email.trim().toLowerCase();
@@ -19,10 +19,6 @@ export const authService = {
     // Validação: Verifica se já existe email
     if (users.some(u => (u.email || '').toLowerCase() === normalizedEmail)) {
       throw new Error("Este email já está vinculado a uma conta.");
-    }
-    if (!apiKey.startsWith('AIza')) {
-        // Validação básica de formato Google API Key
-        throw new Error("Chave de API inválida. Certifique-se de copiar corretamente do Google AI Studio.");
     }
     if (!/^\d{4}$/.test(pin)) {
       throw new Error("O PIN deve conter exatamente 4 números.");
@@ -32,7 +28,6 @@ export const authService = {
       id: Date.now().toString(),
       username: username.trim(), 
       email: normalizedEmail,
-      apiKey: apiKey.trim(),
       pin,
       createdAt: new Date().toISOString(),
       rank: 'Recruta',
@@ -63,13 +58,6 @@ export const authService = {
     return user;
   },
 
-  // Atualiza a chave de API de um usuário existente
-  updateApiKey: (userId: string, newApiKey: string) => {
-      const users = authService.getUsers();
-      const updatedUsers = users.map(u => u.id === userId ? { ...u, apiKey: newApiKey } : u);
-      localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(updatedUsers));
-  },
-
   // Excluir usuário
   deleteUser: (userId: string) => {
     const users = authService.getUsers();
@@ -88,12 +76,6 @@ export const authService = {
     
     const users = authService.getUsers();
     return users.find(u => u.id === userId) || null;
-  },
-
-  // Recupera apenas a API Key do usuário ativo
-  getApiKey: (): string | null => {
-      const user = authService.getSession();
-      return user?.apiKey || null;
   },
 
   // Encerra a sessão

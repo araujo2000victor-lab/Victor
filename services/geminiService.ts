@@ -1,20 +1,20 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { IntelData, SearchResult, QuizQuestion, LawFlashResult } from '../types';
-import { authService } from './authService';
 
 // ============================================================================
 // CONFIGURAÇÃO DINÂMICA (LINK COM CONTA DO USUÁRIO)
 // ============================================================================
 
-// Helper para obter a instância da IA vinculada ao usuário atual
+// Helper para obter a instância da IA usando a chave de ambiente
 const getAIClient = () => {
-    const userKey = authService.getApiKey();
+    // API Key must be obtained exclusively from process.env.API_KEY
+    const apiKey = process.env.API_KEY;
     
-    if (!userKey) {
-        throw new Error("Chave Gemini não detectada. Por favor, faça login novamente e vincule sua conta Google.");
+    if (!apiKey) {
+        throw new Error("Chave Gemini não configurada no ambiente (process.env.API_KEY).");
     }
     
-    return new GoogleGenAI({ apiKey: userKey });
+    return new GoogleGenAI({ apiKey });
 };
 
 const SYSTEM_INSTRUCTION_TEXT = `
@@ -24,17 +24,17 @@ Responda estritamente no formato JSON solicitado quando exigido.
 `;
 
 // === ESTRATÉGIA DE FALLBACK TÁTICO ===
-// Prioridade: Modelos mais novos (2.0) -> Modelos estáveis (1.5)
+// Lista de modelos em ordem de prioridade para evitar falhas de disponibilidade (404)
 const MODELS_PRIORITY = [
-  'gemini-2.0-flash',        // V2 Flash (Alta performance)
-  'gemini-2.0-flash-lite-preview-02-05', // V2 Lite (Velocidade)
-  'gemini-1.5-flash',        // V1.5 Flash (Fallback estável)
-  'gemini-1.5-pro'           // V1.5 Pro (Fallback inteligente)
+  'gemini-2.0-flash-exp',    // Experimental com suporte a tools avançado
+  'gemini-2.0-flash',        // Modelo V2 padrão
+  'gemini-1.5-pro',          // Fallback robusto para pesquisa
+  'gemini-1.5-flash'         // Fallback rápido
 ];
 
 /**
  * Função Wrapper Tática
- * Tenta gerar conteúdo iterando sobre a lista de modelos.
+ * Tenta gerar conteúdo iterando sobre a lista de modelos (Fallback Strategy).
  */
 async function generateTacticalContent(params: any) {
   let lastError = null;
@@ -46,6 +46,7 @@ async function generateTacticalContent(params: any) {
       throw new Error(e.message);
   }
 
+  // Loop de Fallback: Tenta cada modelo da lista sequencialmente
   for (const modelName of MODELS_PRIORITY) {
     try {
       const response = await ai.models.generateContent({
@@ -58,9 +59,14 @@ async function generateTacticalContent(params: any) {
     } catch (error: any) {
       console.warn(`[ALERTA TÁTICO] Falha no modelo ${modelName}. Alternando munição...`, error.message);
       lastError = error;
-      // Se o erro for de autenticação, paramos imediatamente
-      if (error.message && (error.message.includes('API key') || error.message.includes('403'))) {
-          throw new Error("Chave Gemini inválida ou expirada. Verifique suas credenciais.");
+      
+      // Se o erro for de autenticação (403) ou Chave Inválida, paramos imediatamente.
+      // Erros 404 (Not Found) ou 503 (Unavailable) continuam o loop.
+      if (error.message && (error.message.includes('API key') || error.message.includes('403') || error.message.includes('INVALID_ARGUMENT'))) {
+          // Verificação extra: Se for explicitamente "Not Found", permitimos tentar o próximo (pode ser modelo inexistente para aquela chave/região)
+          if (!error.message.includes('404') && !error.message.includes('Not Found')) {
+             throw new Error("Chave Gemini inválida ou erro de permissão. Verifique suas credenciais de ambiente.");
+          }
       }
     }
   }
@@ -72,11 +78,19 @@ async function generateTacticalContent(params: any) {
 // ============================================================================
 // 1. ANÁLISE DE EDITAL (IntelData)
 // ============================================================================
-export const fetchExamIntel = async (examName: string): Promise<SearchResult> => {
+export const fetchExamIntel = async (query: string): Promise<SearchResult> => {
   try {
     const response = await generateTacticalContent({
-      contents: `Analise o concurso: ${examName}. Se não encontrar dados exatos, gere uma estimativa baseada em editais anteriores deste órgão.`,
+      contents: `Pesquise na web pelo edital mais recente e oficial para: "${query}". 
+      Extraia os dados exatos do concurso. 
+      Se o edital ainda não saiu, baseie-se no último edital publicado ou notícias confiáveis recentes sobre a autorização.
+      
+      IMPORTANTE:
+      - 'status' deve ser algo como: 'Edital Publicado', 'Banca Definida', 'Autorizado' ou 'Previsto'.
+      - Liste todas as disciplinas (conteúdo programático) com seus principais tópicos.
+      `,
       config: {
+        tools: [{ googleSearch: {} }], // ATIVA A BUSCA NA WEB
         systemInstruction: SYSTEM_INSTRUCTION_TEXT,
         responseMimeType: "application/json",
         responseSchema: {
@@ -121,11 +135,15 @@ export const fetchExamIntel = async (examName: string): Promise<SearchResult> =>
     if (!text) throw new Error("Resposta vazia da IA");
 
     const data: IntelData = JSON.parse(text);
-    return { data, grounding: null };
+    
+    // Captura metadados de fontes (Grounding)
+    const grounding = response.candidates?.[0]?.groundingMetadata || null;
+
+    return { data, grounding };
 
   } catch (error: any) {
     console.error("Erro na Inteligência:", error);
-    throw new Error(error.message || "Falha ao analisar o edital.");
+    throw new Error(error.message || "Falha ao analisar o edital via Web.");
   }
 };
 

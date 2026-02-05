@@ -3,7 +3,6 @@ export interface User {
   id: string;
   username: string;
   email?: string; // Novo campo para login Google
-  apiKey?: string; // Chave Gemini vinculada à conta
   pin: string; // 4 digits
   createdAt: string;
   rank?: string; // e.g., "Recruta", "Soldado", "Cabo"
