@@ -10,15 +10,15 @@ export const authService = {
     return usersStr ? JSON.parse(usersStr) : [];
   },
 
-  // Cria um novo usuário (Agora com Email) - API Key removida conforme guidelines
-  register: (username: string, email: string, pin: string, avatar?: string): User => {
+  // Cria um novo usuário (Apenas Username + PIN)
+  register: (username: string, pin: string, avatar?: string): User => {
     const users = authService.getUsers();
     
-    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedUsername = username.trim().toUpperCase();
 
-    // Validação: Verifica se já existe email
-    if (users.some(u => (u.email || '').toLowerCase() === normalizedEmail)) {
-      throw new Error("Este email já está vinculado a uma conta.");
+    // Validação: Verifica se já existe nome de guerra
+    if (users.some(u => u.username.toUpperCase() === normalizedUsername)) {
+      throw new Error("Este Nome de Guerra já está em uso.");
     }
     if (!/^\d{4}$/.test(pin)) {
       throw new Error("O PIN deve conter exatamente 4 números.");
@@ -26,8 +26,8 @@ export const authService = {
 
     const newUser: User = {
       id: Date.now().toString(),
-      username: username.trim(), 
-      email: normalizedEmail,
+      username: normalizedUsername, 
+      email: '', // Deprecated/Unused
       pin,
       createdAt: new Date().toISOString(),
       rank: 'Recruta',
@@ -39,19 +39,18 @@ export const authService = {
     return newUser;
   },
 
-  // Autentica o usuário (Por Email)
-  login: (emailInput: string, pin: string): User => {
+  // Autentica o usuário (Por Username + PIN)
+  login: (usernameInput: string, pin: string): User => {
     const users = authService.getUsers();
-    const normalizedInput = emailInput.trim().toLowerCase();
+    const normalizedInput = usernameInput.trim().toUpperCase();
     
-    // Tenta encontrar por email (novo método) ou username (legado)
+    // Tenta encontrar por username apenas
     const user = users.find(u => 
-        ((u.email && u.email.toLowerCase() === normalizedInput) || u.username.toLowerCase() === normalizedInput) 
-        && u.pin === pin
+        u.username.toUpperCase() === normalizedInput && u.pin === pin
     );
     
     if (!user) {
-      throw new Error("Credenciais inválidas. Verifique Email e PIN.");
+      throw new Error("Credenciais inválidas. Verifique Nome de Guerra e PIN.");
     }
     
     localStorage.setItem(ACTIVE_SESSION_KEY, user.id);

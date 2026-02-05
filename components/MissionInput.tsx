@@ -4,7 +4,7 @@ import { IntelData } from '../types';
 
 interface MissionInputProps {
   onStartMission: (data: IntelData) => void;
-  onSearchRequest: (query: string) => void; // Nova prop para busca IA
+  onSearchRequest: (query: string) => void;
   onCancel: () => void;
   hasSavedExams: boolean;
 }
@@ -55,7 +55,7 @@ const MissionInput: React.FC<MissionInputProps> = ({ onStartMission, onSearchReq
       },
       conteudo_programatico: subjects.map(sub => ({
         disciplina: sub,
-        assuntos: [] // Inicia vazio para preenchimento posterior ou via edição
+        assuntos: []
       }))
     };
 
@@ -116,6 +116,8 @@ const MissionInput: React.FC<MissionInputProps> = ({ onStartMission, onSearchReq
                          <Search className="absolute left-4 top-3.5 w-5 h-5 text-gray-400" />
                          <input 
                             type="text" 
+                            id="ai-search-query"
+                            name="query"
                             className="w-full bg-gray-50 dark:bg-black/20 border border-gray-300 dark:border-gray-600 rounded-sm py-3 pl-12 pr-4 text-sm font-mono uppercase focus:border-emerald-500 outline-none shadow-inner"
                             placeholder="Ex: POLÍCIA FEDERAL AGENTE 2024"
                             value={searchQuery}
@@ -145,28 +147,28 @@ const MissionInput: React.FC<MissionInputProps> = ({ onStartMission, onSearchReq
                 <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-4">
                         <div>
-                            <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Órgão / Instituição</label>
-                            <input type="text" className="w-full bg-gray-50 dark:bg-black/20 border border-gray-200 dark:border-gray-600 rounded-sm p-2 text-sm font-mono uppercase focus:border-emerald-500 outline-none" placeholder="Ex: POLÍCIA FEDERAL" value={org} onChange={e => setOrg(e.target.value)} />
+                            <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1" htmlFor="manual-org">Órgão / Instituição</label>
+                            <input type="text" id="manual-org" name="org" className="w-full bg-gray-50 dark:bg-black/20 border border-gray-200 dark:border-gray-600 rounded-sm p-2 text-sm font-mono uppercase focus:border-emerald-500 outline-none" placeholder="Ex: POLÍCIA FEDERAL" value={org} onChange={e => setOrg(e.target.value)} />
                         </div>
                         <div>
-                            <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Cargo / Patente</label>
-                            <input type="text" className="w-full bg-gray-50 dark:bg-black/20 border border-gray-200 dark:border-gray-600 rounded-sm p-2 text-sm font-mono uppercase focus:border-emerald-500 outline-none" placeholder="Ex: AGENTE" value={role} onChange={e => setRole(e.target.value)} />
+                            <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1" htmlFor="manual-role">Cargo / Patente</label>
+                            <input type="text" id="manual-role" name="role" className="w-full bg-gray-50 dark:bg-black/20 border border-gray-200 dark:border-gray-600 rounded-sm p-2 text-sm font-mono uppercase focus:border-emerald-500 outline-none" placeholder="Ex: AGENTE" value={role} onChange={e => setRole(e.target.value)} />
                         </div>
                         <div>
-                            <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Banca Examinadora</label>
-                            <input type="text" className="w-full bg-gray-50 dark:bg-black/20 border border-gray-200 dark:border-gray-600 rounded-sm p-2 text-sm font-mono uppercase focus:border-emerald-500 outline-none" placeholder="Ex: CEBRASPE" value={banca} onChange={e => setBanca(e.target.value)} />
+                            <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1" htmlFor="manual-banca">Banca Examinadora</label>
+                            <input type="text" id="manual-banca" name="banca" className="w-full bg-gray-50 dark:bg-black/20 border border-gray-200 dark:border-gray-600 rounded-sm p-2 text-sm font-mono uppercase focus:border-emerald-500 outline-none" placeholder="Ex: CEBRASPE" value={banca} onChange={e => setBanca(e.target.value)} />
                         </div>
                     </div>
 
                     <div className="space-y-4">
                         <div className="flex gap-4">
                             <div className="flex-1">
-                                <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Total de Questões</label>
-                                <input type="number" className="w-full bg-gray-50 dark:bg-black/20 border border-gray-200 dark:border-gray-600 rounded-sm p-2 text-sm font-mono focus:border-emerald-500 outline-none" value={totalQuestions} onChange={e => setTotalQuestions(e.target.value)} />
+                                <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1" htmlFor="manual-total">Total de Questões</label>
+                                <input type="number" id="manual-total" name="total" className="w-full bg-gray-50 dark:bg-black/20 border border-gray-200 dark:border-gray-600 rounded-sm p-2 text-sm font-mono focus:border-emerald-500 outline-none" value={totalQuestions} onChange={e => setTotalQuestions(e.target.value)} />
                             </div>
                             <div className="flex-1">
-                                <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">Modalidade</label>
-                                <select className="w-full bg-gray-50 dark:bg-black/20 border border-gray-200 dark:border-gray-600 rounded-sm p-2 text-sm font-mono focus:border-emerald-500 outline-none" value={modality} onChange={e => setModality(e.target.value as any)}>
+                                <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1" htmlFor="manual-modality">Modalidade</label>
+                                <select id="manual-modality" name="modality" className="w-full bg-gray-50 dark:bg-black/20 border border-gray-200 dark:border-gray-600 rounded-sm p-2 text-sm font-mono focus:border-emerald-500 outline-none" value={modality} onChange={e => setModality(e.target.value as any)}>
                                     <option value="certo_errado">CERTO / ERRADO</option>
                                     <option value="multipla">MÚLTIPLA ESCOLHA</option>
                                 </select>
@@ -174,11 +176,11 @@ const MissionInput: React.FC<MissionInputProps> = ({ onStartMission, onSearchReq
                         </div>
 
                         <div className="bg-blue-50 dark:bg-blue-900/10 p-3 rounded-sm border border-blue-100 dark:border-blue-800/30">
-                            <label className="block text-[10px] font-bold uppercase text-blue-700 dark:text-blue-500 mb-2 flex items-center gap-2">
+                            <label className="block text-[10px] font-bold uppercase text-blue-700 dark:text-blue-500 mb-2 flex items-center gap-2" htmlFor="manual-subject">
                                 <Layers className="w-3 h-3"/> Adicionar Disciplinas
                             </label>
                             <form onSubmit={handleAddSubject} className="flex gap-2">
-                                <input type="text" className="flex-1 bg-white dark:bg-black/40 border border-gray-200 dark:border-gray-600 rounded-sm p-2 text-xs font-mono uppercase focus:border-emerald-500 outline-none" placeholder="Ex: DIREITO PENAL" value={currentSubject} onChange={e => setCurrentSubject(e.target.value)} />
+                                <input type="text" id="manual-subject" name="subject" className="flex-1 bg-white dark:bg-black/40 border border-gray-200 dark:border-gray-600 rounded-sm p-2 text-xs font-mono uppercase focus:border-emerald-500 outline-none" placeholder="Ex: DIREITO PENAL" value={currentSubject} onChange={e => setCurrentSubject(e.target.value)} />
                                 <button type="submit" disabled={!currentSubject.trim()} className="bg-blue-600 text-white px-3 rounded-sm disabled:opacity-50 hover:bg-blue-500"><Plus className="w-4 h-4"/></button>
                             </form>
                         </div>
@@ -228,7 +230,6 @@ const MissionInput: React.FC<MissionInputProps> = ({ onStartMission, onSearchReq
                 </button>
             )}
             
-            {/* O botão do modo AI já está dentro do form para suportar enter */}
         </div>
 
       </div>
