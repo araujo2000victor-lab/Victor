@@ -24,12 +24,10 @@ Responda estritamente no formato JSON solicitado quando exigido.
 `;
 
 // === ESTRATÉGIA DE FALLBACK TÁTICO ===
-// Lista de modelos em ordem de prioridade para evitar falhas de disponibilidade (404)
+// Lista de modelos em ordem de prioridade seguindo as guidelines de 2025
 const MODELS_PRIORITY = [
-  'gemini-2.0-flash-exp',    // Experimental com suporte a tools avançado
-  'gemini-2.0-flash',        // Modelo V2 padrão
-  'gemini-1.5-pro',          // Fallback robusto para pesquisa
-  'gemini-1.5-flash'         // Fallback rápido
+  'gemini-3-pro-preview',    // Tarefas Complexas e Raciocínio (Edital, Análise)
+  'gemini-3-flash-preview',  // Tarefas Rápidas e Fallback
 ];
 
 /**
