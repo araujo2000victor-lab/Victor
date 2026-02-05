@@ -2,13 +2,13 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { IntelData, SearchResult, QuizQuestion, LawFlashResult } from '../types';
 
 // ============================================================================
-// CONFIGURAÇÃO DINÂMICA (LINK COM CONTA DO USUÁRIO)
+// CONFIGURAÇÃO TÁTICA
 // ============================================================================
 
 const getAIClient = () => {
     const apiKey = process.env.API_KEY;
     if (!apiKey) {
-        throw new Error("Chave Gemini não configurada no ambiente (process.env.API_KEY).");
+        throw new Error("Chave Gemini não detectada. Verifique suas credenciais.");
     }
     return new GoogleGenAI({ apiKey });
 };
@@ -19,76 +19,81 @@ Sua missão: Atuar como especialista em concursos públicos.
 Responda estritamente no formato JSON solicitado quando exigido.
 `;
 
-// === ESTRATÉGIA DE MUNIÇÃO INFINITA (FREE TIER) ===
-// Lista de modelos estáveis. Evitamos versões com data específica (-02-05) que expiram rápido.
+// Lista de modelos priorizando velocidade e estabilidade (Free Tier)
+// Se o 2.0-flash falhar (429/404), tentamos o 1.5-flash
 const MODELS_PRIORITY = [
-  'gemini-2.0-flash',        // O mais rápido e moderno
-  'gemini-1.5-flash',        // O "cavalo de batalha" confiável (Fallback principal)
-  'gemini-1.5-flash-latest', // Alias para garantir a última versão do 1.5
-  'gemini-1.5-pro-latest'    // Último recurso (mais lento, mas potente)
+  'gemini-2.0-flash', 
+  'gemini-1.5-flash',
+  'gemini-1.5-pro'
 ];
 
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+// Função de espera tática (Backoff)
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 async function generateTacticalContent(params: any) {
-  let lastError = null;
-  let ai: GoogleGenAI;
-
-  try {
-      ai = getAIClient();
-  } catch (e: any) {
-      throw new Error(e.message);
-  }
-
+  let lastError: any = null;
+  
+  // Tenta cada modelo na lista de prioridade
   for (const modelName of MODELS_PRIORITY) {
-    try {
-      // Pequena pausa tática inicial para não bombardear a API
-      if (modelName !== MODELS_PRIORITY[0]) {
-          await sleep(1000); 
-      }
+    // Tentativas por modelo (Retry Logic)
+    // Tenta 3 vezes o mesmo modelo se der erro de Cota (429) antes de trocar
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const ai = getAIClient();
+        
+        console.log(`[BOPE INTEL] Disparando requisição. Modelo: ${modelName} (Tentativa ${attempt})`);
+        
+        // Configuração específica para busca se solicitada
+        const config = { ...params.config };
+        
+        // Se usar googleSearch, garante que está configurado corretamente para o modelo
+        if (config.tools && config.tools.some((t: any) => t.googleSearch)) {
+            // Ajuste fino se necessário para modelos específicos
+        }
 
-      console.log(`[BOPE INTEL] Tentando contato via frequência: ${modelName}...`);
-      
-      const response = await ai.models.generateContent({
-        ...params,
-        model: modelName
-      });
-      
-      return response;
+        const response = await ai.models.generateContent({
+          ...params,
+          model: modelName,
+          config
+        });
 
-    } catch (error: any) {
-      const errMsg = error.message || '';
-      
-      console.warn(`[ALERTA TÁTICO] Falha no modelo ${modelName}.`, errMsg);
-      lastError = error;
-      
-      // Tratamento de Cota Excedida (429)
-      if (errMsg.includes('429') || errMsg.includes('quota')) {
-         console.warn("Cota excedida no modelo. Aguardando recarga tática (3s)...");
-         await sleep(3000); // Espera 3 segundos antes de tentar o próximo modelo
-         continue; 
-      }
+        // Sucesso na extração
+        return response;
 
-      // Tratamento de Modelo não encontrado (404)
-      if (errMsg.includes('404') || errMsg.includes('not found')) {
-          console.warn(`Modelo ${modelName} não disponível nesta região/chave. Pulando...`);
-          continue; // Tenta o próximo imediatamente
-      }
+      } catch (error: any) {
+        const errMsg = error.message || '';
+        lastError = error;
+        
+        console.warn(`[ALERTA TÁTICO] Erro no modelo ${modelName}:`, errMsg);
 
-      // Se erro de autenticação, abortar missão
-      if (errMsg.includes('API key') || errMsg.includes('403')) {
-         throw new Error("Chave Gemini inválida ou permissão negada. Verifique suas credenciais.");
+        // Se for erro de COTA (429) ou Serviço Indisponível (503)
+        if (errMsg.includes('429') || errMsg.includes('503') || errMsg.includes('quota')) {
+           const delay = attempt * 2000; // 2s, 4s, 6s...
+           console.log(`[ESPERA TÁTICA] Recarregando munição... Aguardando ${delay}ms.`);
+           await wait(delay);
+           continue; // Tenta o mesmo modelo novamente
+        }
+
+        // Se for 404 (Modelo não encontrado ou API Key sem acesso a ele), aborta este modelo e vai para o próximo
+        if (errMsg.includes('404') || errMsg.includes('not found')) {
+           console.log(`[MODELO INCOMPATÍVEL] ${modelName} não disponível. Trocando munição.`);
+           break; // Sai do loop de tentativas deste modelo e vai para o próximo modelo da lista
+        }
+
+        // Se for erro de autenticação, para tudo
+        if (errMsg.includes('API key') || errMsg.includes('403')) {
+           throw new Error("Chave de Acesso Inválida. Verifique a API Key.");
+        }
+        
+        // Outros erros, tenta próximo modelo
+        break;
       }
     }
   }
 
-  console.error("[FALHA CRÍTICA] Todos os modelos táticos falharam.");
-  
-  if (lastError?.message?.includes('429') || lastError?.message?.includes('quota')) {
-      throw new Error("Sobrecarga de tráfego tático (Erro 429). Aguarde 1 minuto e tente novamente.");
-  }
-  
-  throw lastError || new Error("Sistema de inteligência indisponível. Verifique sua conexão.");
+  // Se chegou aqui, todos os modelos falharam
+  console.error("[FALHA CRÍTICA] Todos os modelos falharam.", lastError);
+  throw new Error("Sistema de Inteligência sobrecarregado. Tente novamente em 1 minuto.");
 }
 
 // ============================================================================
@@ -98,15 +103,14 @@ export const fetchExamIntel = async (query: string): Promise<SearchResult> => {
   try {
     const response = await generateTacticalContent({
       contents: `Pesquise na web pelo edital mais recente e oficial para: "${query}". 
-      Extraia os dados exatos do concurso. 
-      Se o edital ainda não saiu, baseie-se no último edital publicado ou notícias confiáveis recentes.
+      Extraia os dados exatos do concurso.
+      Se não houver edital aberto, baseie-se no último edital.
       
       IMPORTANTE:
       - 'status' deve ser: 'Edital Publicado', 'Banca Definida', 'Autorizado' ou 'Previsto'.
-      - Liste todas as disciplinas principais e seus tópicos.
       `,
       config: {
-        tools: [{ googleSearch: {} }],
+        tools: [{ googleSearch: {} }], // Ferramenta de busca oficial do @google/genai
         systemInstruction: SYSTEM_INSTRUCTION_TEXT,
         responseMimeType: "application/json",
         responseSchema: {
@@ -148,7 +152,7 @@ export const fetchExamIntel = async (query: string): Promise<SearchResult> => {
     });
 
     const text = response.text;
-    if (!text) throw new Error("Resposta vazia da IA");
+    if (!text) throw new Error("A IA não retornou dados legíveis.");
 
     const data: IntelData = JSON.parse(text);
     const grounding = response.candidates?.[0]?.groundingMetadata || null;
@@ -167,8 +171,8 @@ export const fetchExamIntel = async (query: string): Promise<SearchResult> => {
 export const generateStudyContent = async (subject: string, topic: string, type: 'summary' | 'full'): Promise<string> => {
   try {
     const prompt = type === 'summary' 
-      ? `Crie um resumo tático (HTML) sobre: ${topic} da disciplina ${subject}. Use tópicos, negrito e seja direto.`
-      : `Crie uma aula completa (HTML) sobre: ${topic} da disciplina ${subject}. Inclua conceitos, exemplos práticos e jurisprudência se aplicável.`;
+      ? `Crie um resumo tático (HTML) sobre: ${topic} da disciplina ${subject}. Use <h3>, <ul>, <li>, <b>.`
+      : `Crie uma aula completa (HTML) sobre: ${topic} da disciplina ${subject}. Seja detalhado.`;
 
     const response = await generateTacticalContent({
       contents: prompt,
@@ -177,8 +181,7 @@ export const generateStudyContent = async (subject: string, topic: string, type:
 
     return response.text || "<p>Erro ao gerar conteúdo.</p>";
   } catch (error: any) {
-    if (error.message.includes('Cota') || error.message.includes('429')) return `<p class="text-red-500 font-bold">⚠️ Sistema sobrecarregado (Cota). Tente novamente em alguns segundos.</p>`;
-    return `<p>Erro de comunicação com a base tática: ${error.message}</p>`;
+    return `<p class="text-red-500 font-bold">⚠️ Falha na comunicação tática: ${error.message}</p>`;
   }
 };
 
@@ -222,7 +225,7 @@ export const generateQuizQuestions = async (examName: string, bank: string, subj
 export const generateLawFlash = async (lawName: string, lawUrl?: string) => {
     try {
         const response = await generateTacticalContent({
-            contents: `Selecione um artigo importante de: ${lawName}. Retorne JSON com o artigo, resumo e dica.`,
+            contents: `Selecione um artigo importante de: ${lawName}. Retorne JSON com artigo, resumo e dica.`,
             config: {
                 systemInstruction: SYSTEM_INSTRUCTION_TEXT,
                 responseMimeType: "application/json",
@@ -249,7 +252,7 @@ export const generateLawFlash = async (lawName: string, lawUrl?: string) => {
 export const generatePerformanceAnalysis = async (stats: any) => {
     try {
         const response = await generateTacticalContent({
-            contents: `Analise este desempenho de estudo e dê 3 dicas táticas (HTML curto): ${JSON.stringify(stats)}`,
+            contents: `Analise este desempenho e dê 3 dicas táticas (HTML curto): ${JSON.stringify(stats)}`,
             config: { systemInstruction: SYSTEM_INSTRUCTION_TEXT }
         });
         return response.text || "Análise indisponível.";
